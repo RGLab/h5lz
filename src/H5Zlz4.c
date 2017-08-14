@@ -19,7 +19,7 @@ static size_t H5Z_filter_lz4(unsigned int flags, size_t cd_nelmts,
         const unsigned int cd_values[], size_t nbytes,
         size_t *buf_size, void **buf);
 
-#define H5Z_FILTER_LZ4 32005
+#define H5Z_FILTER_LZ4 32004
 
 #define htonll(x) ( ( (uint64_t)(htonl( (uint32_t)((x << 32) >> 32)))<< 32) | htonl( ((uint32_t)(x >> 32)) ))
 #define ntohll(x) htonll(x)

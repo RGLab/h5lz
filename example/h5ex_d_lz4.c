@@ -30,7 +30,7 @@
 #define DIM1            640
 #define CHUNK0          320
 #define CHUNK1          8
-#define H5Z_FILTER_LZ4        32005
+#define H5Z_FILTER_LZ4        32004
 
 int
 main (void)
@@ -48,7 +48,7 @@ main (void)
     size_t          nelmts = 1;                /* number of elements in cd_values */
     unsigned int    flags;
     unsigned        filter_config;
-    const unsigned int cd_values[1] = {3};     /* lz4 default is 3 */
+    const unsigned int cd_values[1] = {1};     /* lz4 default is 3 */
     unsigned int       values_out[1] = {99};
     int             wdata[DIM0][DIM1],          /* Write buffer */
                     rdata[DIM0][DIM1],          /* Read buffer */
