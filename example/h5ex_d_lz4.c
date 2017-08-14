@@ -26,11 +26,11 @@
 
 #define FILE            "h5ex_d_lz4.h5"
 #define DATASET         "DS1"
-#define DIM0            32
-#define DIM1            64
-#define CHUNK0          4
+#define DIM0            320
+#define DIM1            640
+#define CHUNK0          320
 #define CHUNK1          8
-#define H5Z_FILTER_LZ4        32004
+#define H5Z_FILTER_LZ4        32005
 
 int
 main (void)
@@ -84,8 +84,7 @@ main (void)
     if (dcpl_id < 0) goto done;
 
     status = H5Pset_filter (dcpl_id, H5Z_FILTER_LZ4, H5Z_FLAG_MANDATORY, (size_t)1, cd_values);
-    if (status < 0) goto done;
-
+           if (status < 0) goto done;
     /* 
      * Check that filter is registered with the library now.
      * If it is registered, retrieve filter's configuration. 
@@ -96,7 +95,16 @@ main (void)
         if ( (filter_config & H5Z_FILTER_CONFIG_ENCODE_ENABLED) && 
                 (filter_config & H5Z_FILTER_CONFIG_DECODE_ENABLED) ) 
             printf ("lz4 filter is available for encoding and decoding.\n");
-    }     
+    }
+    else
+    {
+    	printf ("lz4 filter is not availabe.\n");
+    	goto done;
+    }
+
+
+
+
     status = H5Pset_chunk (dcpl_id, 2, chunk);
     if (status < 0) printf ("failed to set chunk.\n");
 

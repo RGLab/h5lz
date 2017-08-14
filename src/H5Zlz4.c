@@ -19,7 +19,7 @@ static size_t H5Z_filter_lz4(unsigned int flags, size_t cd_nelmts,
         const unsigned int cd_values[], size_t nbytes,
         size_t *buf_size, void **buf);
 
-#define H5Z_FILTER_LZ4 32004
+#define H5Z_FILTER_LZ4 32005
 
 #define htonll(x) ( ( (uint64_t)(htonl( (uint32_t)((x << 32) >> 32)))<< 32) | htonl( ((uint32_t)(x >> 32)) ))
 #define ntohll(x) htonll(x)
@@ -32,14 +32,14 @@ static size_t H5Z_filter_lz4(unsigned int flags, size_t cd_nelmts,
 #define be64toht(x) ntohll(x)
 
 
-#define DEFAULT_BLOCK_SIZE 1<<30; /* 1GB. LZ4 needs blocks < 1.9GB. */
+#define DEFAULT_ACCEL 1; /* 1GB. LZ4 needs blocks < 1.9GB. */
 
 const H5Z_class2_t H5Z_LZ4[1] = {{
         H5Z_CLASS_T_VERS,       /* H5Z_class_t version */
         (H5Z_filter_t)H5Z_FILTER_LZ4,         /* Filter id number             */
         1,              /* encoder_present flag (set to true) */
         1,              /* decoder_present flag (set to true) */
-        "HDF5 lz4 filter; see http://www.hdfgroup.org/services/contributions.html",
+        "HDF5 lz4 filter; see  http://github.com/RGLab/h5lz",
         /* Filter name for debugging    */
         NULL,                       /* The "can apply" callback     */
         NULL,                       /* The "set local" callback     */
@@ -59,7 +59,7 @@ static size_t H5Z_filter_lz4(unsigned int flags, size_t cd_nelmts,
     if (flags & H5Z_FLAG_REVERSE)
     {
         uint32_t *i32Buf;
-        uint32_t blockSize;
+        uint32_t compressedSize;
         char *roBuf;   /* pointer to current write position */
         uint64_t decompSize;
         const char* rpos = (char*)*buf; /* pointer to current read position */
@@ -68,10 +68,9 @@ static size_t H5Z_filter_lz4(unsigned int flags, size_t cd_nelmts,
         rpos += 8; /* advance the pointer */
 
         i32Buf = (uint32_t*)rpos;
-        blockSize = (uint32_t)(be32toht(*i32Buf));
+        compressedSize = (uint32_t)(be32toht(*i32Buf));/// is saved in be format
+
         rpos += 4;
-        if(blockSize>origSize)
-            blockSize = origSize;
 
         if (NULL==(outBuf = malloc(origSize)))
         {
@@ -81,33 +80,12 @@ static size_t H5Z_filter_lz4(unsigned int flags, size_t cd_nelmts,
         roBuf = (char*)outBuf;   /* pointer to current write position */
         decompSize     = 0;
         /// start with the first block ///
-        while(decompSize < origSize)
-        {
-            uint32_t compressedBlockSize;  /// is saved in be format
-
-            if(origSize-decompSize < blockSize) /* the last block can be smaller than blockSize. */
-                blockSize = origSize-decompSize;
-            i32Buf = (uint32_t*)rpos;
-            compressedBlockSize =  be32toht(*i32Buf);  /// is saved in be format
-            rpos += 4;
-            if(compressedBlockSize == blockSize) /* there was no compression */
-            {
-                memcpy(roBuf, rpos, blockSize);
-            }
-            else /* do the decompression */
-            {
-                int compressedBytes = LZ4_uncompress(rpos, roBuf, blockSize);
-                if(compressedBytes != compressedBlockSize)
-                {
-                    printf("decompressed size not the same: %d, != %d\n", compressedBytes, compressedBlockSize);
-                    goto error;
-                }
-            }
-
-            rpos += compressedBlockSize;   /* advance the read pointer to the next block */
-            roBuf += blockSize;            /* advance the write pointer */
-            decompSize += blockSize;
-        }
+        uint32_t nDest = LZ4_decompress_fast(rpos, roBuf, origSize);
+		if(nDest != compressedSize)
+		{
+			 printf("decompressed size not the same: %d, != %d\n", nDest, compressedSize);
+			 goto error;
+		}
         free(*buf);
         *buf = outBuf;
         outBuf = NULL;
@@ -115,10 +93,8 @@ static size_t H5Z_filter_lz4(unsigned int flags, size_t cd_nelmts,
     }
     else /* forward filter */
     {
-        size_t blockSize;
-        size_t nBlocks;
+    	size_t acceleration;
         size_t outSize; /* size of the output buffer. Header size (12 bytes) is included */
-        size_t block;
         uint64_t *i64Buf;
         uint32_t *i32Buf;
         char *rpos;      /* pointer to current read position */
@@ -132,19 +108,15 @@ static size_t H5Z_filter_lz4(unsigned int flags, size_t cd_nelmts,
 
         if(cd_nelmts > 0 && cd_values[0] > 0)
         {
-            blockSize = cd_values[0];
+        	acceleration = cd_values[0];
         }
         else
         {
-            blockSize = DEFAULT_BLOCK_SIZE;
+        	acceleration = DEFAULT_ACCEL;
         }
-        if(blockSize > nbytes)
-        {
-            blockSize = nbytes;
-        }
-        nBlocks = (nbytes-1)/blockSize +1;
-        if (NULL==(outBuf = malloc(LZ4_COMPRESSBOUND(nbytes)
-                + 4+8 + nBlocks*4)))
+        uint32_t nMaxSize = LZ4_COMPRESSBOUND(nbytes);
+
+        if (NULL==(outBuf = malloc(nMaxSize)))
         {
             goto error;
         }
@@ -156,36 +128,12 @@ static size_t H5Z_filter_lz4(unsigned int flags, size_t cd_nelmts,
         i64Buf[0] = htobe64t((uint64_t)nbytes); /* Store decompressed size in be format */
         roBuf += 8;
 
+        uint32_t nCompressed = LZ4_compress_fast(rpos, roBuf+4, nbytes, nMaxSize, acceleration);
+        if(!nCompressed)
+        	goto error;
+        outSize =  nCompressed + 12; /* size of the output buffer. Header size (12 bytes) is included */
         i32Buf =  (uint32_t *) (roBuf);
-        i32Buf[0] = htobe32t((uint32_t)blockSize); /* Store the block size in be format */
-        roBuf += 4;
-
-        outSize = 12; /* size of the output buffer. Header size (12 bytes) is included */
-
-        for(block = 0; block < nBlocks; ++block)
-        {
-            uint32_t compBlockSize; /// reserve space for compBlockSize
-            size_t origWritten = block*blockSize;
-            if(nbytes - origWritten < blockSize) /* the last block may be < blockSize */
-                blockSize = nbytes - origWritten;
-
-            compBlockSize = LZ4_compress(rpos, roBuf+4, blockSize); /// reserve space for compBlockSize
-            if(!compBlockSize)
-                goto error;
-            if(compBlockSize >= blockSize) /* compression did not save any space, do a memcpy instead */
-            {
-                compBlockSize = blockSize;
-                memcpy(roBuf+4, rpos, blockSize);
-            }
-
-            i32Buf =  (uint32_t *) (roBuf);
-            i32Buf[0] = htobe32t((uint32_t)compBlockSize);  /* write blocksize */
-            roBuf += 4;
-
-            rpos += blockSize;     	/* advance read pointer */
-            roBuf += compBlockSize;       /* advance write pointer */
-            outSize += compBlockSize + 4;
-        }
+        i32Buf[0] = htobe32t((uint32_t)nCompressed); /* Store the compressed size in be format */
 
         free(*buf);
         *buf = outBuf;
@@ -194,7 +142,7 @@ static size_t H5Z_filter_lz4(unsigned int flags, size_t cd_nelmts,
         ret_value = outSize;
 
     }
-    done:
+
     if(outBuf)
         free(outBuf);
     return ret_value;
